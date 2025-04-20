@@ -1,71 +1,84 @@
-from flask import Blueprint, jsonify, render_template, send_file, request, current_app
-from flask_wtf.csrf import generate_csrf
-from flask_cors import cross_origin  # ✅ Import this
-from .forms import MovieForm
-from .models import Movie
-from . import db
+from app import app, db
+from flask import render_template, request, jsonify, send_file, send_from_directory
 import os
+from app.models import Movies, ArticlesSchema
+from app.forms import MovieForm
+from flask_wtf.csrf import generate_csrf
 from werkzeug.utils import secure_filename
 
+###
+# Routing for your application.
+###
 
-main = Blueprint('main', __name__)  # Blueprint named "main"
-
-@main.route('/')
+@app.route('/')
 def index():
     return jsonify(message="This is the beginning of our API")
 
-
-@main.route('/api/v1/movies', methods=['POST'])
-@cross_origin()  # ✅ Allow frontend to POST
-def movies():
-    form = MovieForm()
-
-    if form.validate_on_submit():
-        title = form.title.data
-        description = form.description.data
-        poster = form.poster.data
-
-        filename = secure_filename(poster.filename)
-        poster.save(os.path.join(current_app.config['UPLOAD_FOLDER'], filename))
-
-        new_movie = Movie(title=title, description=description, poster=filename)
-        db.session.add(new_movie)
-        db.session.commit()
-
-        return jsonify({
-            "message": "Movie Successfully added",
-            "title": title,
-            "poster": filename,
-            "description": description
-        }), 201
-
-    return jsonify({"errors": form_errors(form)}), 400
-
-
-@main.route('/api/v1/movies', methods=['GET'])
-@cross_origin()  # ✅ Allow frontend to GET
-def get_movies():
-    movies = Movie.query.all()
-    movie_list = []
-
-    for movie in movies:
-        movie_list.append({
-            'id': movie.id,
-            'title': movie.title,
-            'description': movie.description,
-            'poster': movie.poster,
-            'created_at': movie.created_at.strftime('%Y-%m-%d %H:%M:%S')
-        })
-
-    return jsonify(movies=movie_list)
-
-
-@main.route('/api/v1/csrf-token', methods=['GET'])
-@cross_origin()  # ✅ Allow frontend to get CSRF
+@app.route('/api/v1/csrf-token', methods=['GET'])
 def get_csrf():
-    return jsonify({'csrf_token': generate_csrf()})
+    return jsonify({'csrf_token': generate_csrf()}) 
 
 
+@app.route('/api/v1/movies', methods=['GET'])
+def movies():
+    movies = Movies.query.all()
+    result = []
+    for movie in movies:
+        result.append({
+            "id": movie.id,
+            "title": movie.title,
+            "description": movie.description,
+            "poster": movie.poster
+        })
+    return jsonify(result)
+
+
+@app.route('/api/v1/posters/<filename>')
+def get_poster(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+
+
+
+
+
+from werkzeug.datastructures import CombinedMultiDict
+
+@app.route('/api/v1/movies', methods=['POST'])
+def add_movie():
+    try:
+        form = MovieForm(CombinedMultiDict([request.form, request.files]))
+
+        if form.validate_on_submit():
+            title = form.title.data
+            description = form.description.data
+            poster = form.poster.data
+
+            filename = secure_filename(poster.filename)
+            poster.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
+            movie = Movies(title=title, description=description, poster=filename)
+            db.session.add(movie)
+            db.session.commit()
+
+            return jsonify({
+                "message": "Movie Successfully added",
+                "title": movie.title,
+                "poster": movie.poster,
+                "description": movie.description
+            }), 201
+
+        return jsonify({'errors': form_errors(form)}), 400
+    
+    except Exception as e:
+        print("ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+###
+# The functions below should be applicable to all Flask apps.
+###
+
+# Collect form errors from Flask-WTF
 def form_errors(form):
     error_messages = []
     for field, errors in form.errors.items():
@@ -78,19 +91,25 @@ def form_errors(form):
     return error_messages
 
 
-@main.route('/<file_name>.txt')
+@app.route('/<file_name>.txt')
 def send_text_file(file_name):
+    """Send your static text file."""
     file_dot_text = file_name + '.txt'
-    return send_file(os.path.join(current_app.static_folder, file_dot_text))
+    return app.send_static_file(file_dot_text)
 
 
-@main.after_request
+@app.after_request
 def add_header(response):
+    """
+    Add headers to force latest IE rendering engine or Chrome Frame,
+    and also tell the browser not to cache the rendered page.
+    """
     response.headers['X-UA-Compatible'] = 'IE=Edge,chrome=1'
     response.headers['Cache-Control'] = 'public, max-age=0'
     return response
 
 
-@main.errorhandler(404)
+@app.errorhandler(404)
 def page_not_found(error):
+    """Custom 404 page."""
     return render_template('404.html'), 404

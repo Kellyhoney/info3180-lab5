@@ -1,26 +1,16 @@
 from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_wtf.csrf import CSRFProtect
 from .config import Config
+from flask_sqlalchemy import SQLAlchemy
+from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import generate_csrf
 
-db = SQLAlchemy()
-migrate = Migrate()
-csrf = CSRFProtect()
+app = Flask(__name__)
+csrf = CSRFProtect(app)
 
-def create_app():
-    app = Flask(__name__)
-    app.config.from_object(Config)
+app.config.from_object(Config)
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
-    db.init_app(app)
-    migrate.init_app(app, db)
-    csrf.init_app(app)
 
-    from app.models import Movie
-    from app.views import main  # <-- import blueprint
-
-    app.register_blueprint(main)  # <-- register blueprint
-
-    return app
-
-app = create_app()  # Needed so 'flask --app app' works
+from app import views
